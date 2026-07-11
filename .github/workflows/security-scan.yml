@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: trivy fs + SBOM (CycloneDX)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0   # pinned release tag (was @master, mutable — C4 supply-chain fix)
         with:
           scan-type: fs
           format: cyclonedx

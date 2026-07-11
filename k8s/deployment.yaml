@@ -1,5 +1,8 @@
 # TMS backend Deployment — skeleton (NFR-DEPLOY-01). Single-command staging deploy target (TS-B-09).
 # Secrets come from a Secret (secret store), NEVER inline (NFR-SEC-01, C4 M1-T1).
+# Container hardening = C4 least-privilege / R9 control (kube-linter enforced in security-scan.yml):
+# runAsNonRoot, read-only rootfs (+ emptyDir /tmp for Spring Boot temp), no privilege escalation,
+# all capabilities dropped, seccomp RuntimeDefault, resource limits, and pod anti-affinity.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,10 +16,29 @@ spec:
     metadata:
       labels: { app: tms-backend }
     spec:
+      securityContext:              # pod-level: non-root + seccomp baseline
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      affinity:                     # spread the 2 replicas across nodes (kube-linter no-anti-affinity)
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: { app: tms-backend }
       containers:
         - name: tms-backend
           image: registry.vgc.example/tms-backend:0.1.0   # placeholder registry, set by CI
           ports: [{ containerPort: 8080 }]
+          securityContext:          # container-level least-privilege
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
           envFrom:
             - configMapRef: { name: tms-config }
             - secretRef: { name: tms-secrets }             # DB_PASSWORD, POLARION_TOKEN — from secret store
@@ -29,3 +51,8 @@ spec:
           resources:
             requests: { cpu: "250m", memory: "512Mi" }
             limits: { cpu: "1", memory: "1Gi" }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }               # writable scratch (rootfs is read-only)
+      volumes:
+        - name: tmp
+          emptyDir: {}
