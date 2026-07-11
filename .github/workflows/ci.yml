@@ -26,17 +26,19 @@ jobs:
       - name: Set up Gradle (pinned)
         uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.10" }
-      # Split into named steps so the FAILING STEP NAME (visible at job level, no log content
-      # needed) tells us compile-main vs compile-test vs run-tests — works around the 403 log access.
-      - name: STEP-A compile main sources
+      # Capture full build output to a file + upload as an ARTIFACT (publicly downloadable for
+      # public repos, unlike the 403'd job logs) so B3 can read the exact compile/test error.
+      - name: build (compile + test), capture output
         working-directory: backend
-        run: gradle compileJava --no-daemon --stacktrace
-      - name: STEP-B compile test sources
-        working-directory: backend
-        run: gradle compileTestJava --no-daemon --stacktrace
-      - name: STEP-C run unit tests (JUnit — RBAC + M1 read-sync/reconcile/bidi/error-queue)
-        working-directory: backend
-        run: gradle test --no-daemon --stacktrace --info
+        run: |
+          set -o pipefail
+          gradle compileJava compileTestJava test --no-daemon --stacktrace 2>&1 | tee build-output.txt
+      - name: upload build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: backend/build-output.txt
 
   logic-verify:
     runs-on: ubuntu-latest
