@@ -33,8 +33,15 @@ jobs:
         run: |
           set -o pipefail
           if ! gradle compileJava compileTestJava test --no-daemon --stacktrace > build-output.txt 2>&1; then
-            grep -nE "\.java:[0-9]+:|error:|cannot find symbol|incompatible types|No qualifying bean|NoSuchBeanDefinitionException|Parameter [0-9]+ of|Error creating bean|Unsatisfied dependency|expected at least 1 bean| > .* (FAILED|PASSED)|expected:|but was:|AssertionFailedError" build-output.txt \
+            grep -nE "\.java:[0-9]+:|error:|cannot find symbol|No qualifying bean of type|NoSuchBeanDefinitionException|UnsatisfiedDependencyException|Failed to load ApplicationContext|Parameter .* required a bean|Error creating bean with name|expected at least 1 bean|Wanted but not invoked|AssertionFailedError|expected:|but was:| > .* FAILED" build-output.txt \
               | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            # dump a 25-line window around the first root-cause exception for full context
+            FIRST=$(grep -nE "No qualifying bean of type|UnsatisfiedDependencyException|Caused by:.*Exception|ApplicationContextException" build-output.txt | head -1 | cut -d: -f1)
+            if [ -n "$FIRST" ]; then
+              echo "::group::root-cause context"
+              sed -n "$((FIRST>3?FIRST-3:1)),$((FIRST+22))p" build-output.txt | while IFS= read -r l; do echo "::error::CTX $l"; done
+              echo "::endgroup::"
+            fi
             exit 1
           fi
 
