@@ -120,3 +120,25 @@ check("bidi_openConflict_frozen",
       write_back("7", "5", {"title": "x"}, stored_h, has_open_conflict=True) == "FROZEN")
 
 print("\nALL BIDI/CONFLICT SCENARIOS PASS — REQ-M1-03/04 E1/E2 no-silent-overwrite verified.")
+
+# --- PR#5 refinements: revision-guarded write (TOCTOU) + resolve re-base (v1.3 §E1/E2) ---
+def write_back_guarded(check_rev, last_common_rev, tms_fields, stored_hash, rev_at_write, has_open_conflict=False):
+    if has_open_conflict: return "FROZEN"
+    polarion_moved = check_rev != last_common_rev
+    tms_dirty = sha_fields(tms_fields) != stored_hash
+    if polarion_moved and tms_dirty: return "CONFLICT_QUEUED"          # E1/E2 predicate
+    if rev_at_write != check_rev: return "CONFLICT_QUEUED"             # If-Match guard rejects → no LWW
+    return "WRITTEN"
+
+syncedh = sha_fields({"title":"orig"})
+# TOCTOU: predicate clean (check rev == base), TMS dirty, but Polarion moved between check and write
+check("toctou_revisionChangesBetweenCheckAndWrite_conflict",
+      write_back_guarded("5", "5", {"title":"edit"}, syncedh, rev_at_write="6") == "CONFLICT_QUEUED")
+# no race: rev stable through write → WRITTEN
+check("guardedWrite_noRace_writes",
+      write_back_guarded("5", "5", {"title":"orig"}, syncedh, rev_at_write="5") == "WRITTEN")
+# resolve re-base: after resolve, lastCommon=newRev & storedHash=resolvedHash → next write clean
+resolved = {"title":"agreed"}; new_rev="10"; rebased_hash=sha_fields(resolved)
+check("resolvedConflict_doesNotReTrigger",
+      write_back_guarded(new_rev, new_rev, resolved, rebased_hash, rev_at_write=new_rev) == "WRITTEN")
+print("\nALL PR#5-REFINEMENT SCENARIOS PASS — TOCTOU revision-guard + resolve re-base verified.")

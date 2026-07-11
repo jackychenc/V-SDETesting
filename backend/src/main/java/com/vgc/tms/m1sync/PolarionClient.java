@@ -24,6 +24,12 @@ public interface PolarionClient {
     /** Current Polarion revision of a work item (for conflict detection, REQ-M1-04). null if absent. */
     String currentRevision(String polarionProjectId, String polarionId);
 
-    /** Write back to Polarion (REQ-M1-03). Returns the new revision. Idempotent on polarionId. */
-    String write(String polarionProjectId, PolarionWorkItem item);
+    /**
+     * Revision-guarded (optimistic / If-Match) write-back (REQ-M1-03, contract v1.3 §E1).
+     * Writes ONLY if Polarion's current revision still equals {@code expectedRevision} (the revision
+     * read at the conflict check). If Polarion moved in the check→write window (concurrent edit),
+     * the write is REJECTED and this returns null — the caller queues a ConflictItem, never forces.
+     * Closes the TOCTOU silent-overwrite (LWW) vector (B4/C4 M1-T3). Returns the new revision on success.
+     */
+    String writeIfRevisionMatches(String polarionProjectId, PolarionWorkItem item, String expectedRevision);
 }

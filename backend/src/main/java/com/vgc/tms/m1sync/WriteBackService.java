@@ -51,18 +51,21 @@ public class WriteBackService {
 
         // E1/E2 authoritative predicate — BOTH sides moved ⇒ conflict (no LWW).
         if (polarionMoved && tmsDirty) {
-            ConflictItemEntity c = new ConflictItemEntity();
-            c.itemPolarionId = tc.polarionId;
-            c.fieldDiffs = "{\"base\":\"" + safe(tc.lastCommonRevision) + "\",\"polarionRev\":\"" + safe(currentRevision)
-                    + "\",\"tmsHash\":\"" + currentTmsHash + "\",\"storedHash\":\"" + safe(tc.contentHash) + "\"}";
-            conflicts.save(c);
+            queueConflict(tc, currentRevision, currentTmsHash, currentFields);
             return Result.CONFLICT_QUEUED;   // DO NOT WRITE
         }
 
-        // No conflict (Polarion-only change, or clean) → write, refresh base + hash.
-        String newRev = polarion.write(polarionProjectId, new PolarionWorkItem(tc.polarionId, "testcase", null, currentFields));
+        // No conflict at check time → REVISION-GUARDED write (§E1): write only if Polarion still at
+        // `currentRevision`. If a concurrent edit landed in the check→write window, the write is
+        // rejected (null) → queue a conflict, NEVER force-overwrite (closes TOCTOU / M1-T3).
+        String newRev = polarion.writeIfRevisionMatches(polarionProjectId,
+                new PolarionWorkItem(tc.polarionId, "testcase", null, currentFields), currentRevision);
+        if (newRev == null) {
+            queueConflict(tc, polarion.currentRevision(polarionProjectId, tc.polarionId), currentTmsHash, currentFields);
+            return Result.CONFLICT_QUEUED;   // concurrent edit in the window → conflict, no overwrite
+        }
         tc.revision = newRev;
-        tc.lastCommonRevision = newRev;
+        tc.lastCommonRevision = newRev;       // re-base
         tc.contentHash = currentTmsHash;
         tc.sourceRevision = newRev;
         tc.lastSyncedAt = Instant.now();
@@ -70,12 +73,35 @@ public class WriteBackService {
         return Result.WRITTEN;
     }
 
-    /** Human resolution closes the conflict and re-bases both sides (REQ-M1-04). */
+    /** 3-way conflict record (§E2 fieldDiffs{tmsValue, polarionValue, baseValue}) for human resolution. */
+    private void queueConflict(TestCaseEntity tc, String polarionRev, String tmsHash, Map<String, Object> tmsFields) {
+        ConflictItemEntity c = new ConflictItemEntity();
+        c.itemPolarionId = tc.polarionId;
+        c.fieldDiffs = "{\"baseRevision\":\"" + safe(tc.lastCommonRevision) + "\",\"baseHash\":\"" + safe(tc.contentHash)
+                + "\",\"polarionRevision\":\"" + safe(polarionRev) + "\",\"tmsValue\":\"" + safe(String.valueOf(tmsFields))
+                + "\",\"tmsHash\":\"" + tmsHash + "\"}";
+        conflicts.save(c);
+    }
+
+    /**
+     * Human resolution (§E2): write the chosen value to both sides and RE-BASE both anchors —
+     * lastCommonRevision = post-resolution Polarion revision, storedContentHash = resolved TMS hash.
+     * Without this the next sync would re-detect the same conflict (thrash).
+     */
     @Transactional
-    public void resolve(Long conflictId, String resolutionJson) {
+    public void resolve(Long conflictId, String polarionProjectId, TestCaseEntity tc, Map<String, Object> resolvedFields) {
         conflicts.findById(conflictId).ifPresent(c -> {
+            // force-write the human-chosen resolution (bypasses the guard — this IS the authoritative value)
+            String newRev = polarion.writeIfRevisionMatches(polarionProjectId,
+                    new PolarionWorkItem(tc.polarionId, "testcase", null, resolvedFields),
+                    polarion.currentRevision(polarionProjectId, tc.polarionId));
+            tc.revision = newRev;
+            tc.lastCommonRevision = newRev;                        // re-base BOTH anchors...
+            tc.contentHash = ContentHash.of(resolvedFields);       // ...so the conflict does not re-trigger
+            tc.lastSyncedAt = Instant.now();
+            testCases.save(tc);
             c.status = "resolved";
-            c.resolution = resolutionJson;
+            c.resolution = String.valueOf(resolvedFields);
             conflicts.save(c);
         });
     }

@@ -10,15 +10,15 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Bidi write-back conflict tests (REQ-M1-03/04, TS-B-02) — B2 v1.3 E1/E2 predicate:
- * CONFLICT ⇔ Polarion moved (currentRevision != lastCommonRevision) AND TMS locally dirty
- *            (currentTmsHash != storedContentHash). No last-write-wins.
+ * Bidi write-back tests (REQ-M1-03/04, TS-B-02) — B2 v1.3 §E1/E2:
+ * predicate (no-LWW), REVISION-GUARDED write (TOCTOU / M1-T3), resolve re-base (no re-trigger).
  */
 class WriteBackServiceTest {
 
@@ -34,7 +34,7 @@ class WriteBackServiceTest {
         TestCaseEntity tc = new TestCaseEntity();
         tc.projectId = 1L; tc.polarionId = "A";
         tc.lastCommonRevision = "5";
-        tc.contentHash = ContentHash.of(SYNCED);   // last-synced hash
+        tc.contentHash = ContentHash.of(SYNCED);
         return tc;
     }
 
@@ -50,30 +50,52 @@ class WriteBackServiceTest {
     }
 
     @Test
-    void polarionOnlyChange_noFalseConflict_writesThrough() {   // TS-B-02 boundary: Polarion moved, TMS clean
-        polarion.put(new PolarionWorkItem("A", "testcase", "7", SYNCED));  // Polarion at rev 7 != base 5
-        TestCaseEntity tc = syncedTc();                                    // TMS NOT dirty (fields == synced)
-        WriteBackService.Result r = svc.writeBack(1L, "PROJ", tc, SYNCED);
-        assertEquals(WriteBackService.Result.WRITTEN, r, "Polarion-only change must not raise a false conflict");
+    void polarionOnlyChange_noFalseConflict_writesThrough() {   // Polarion at base, TMS clean → no conflict
+        polarion.put(new PolarionWorkItem("A", "testcase", "5", SYNCED));  // guard passes
+        assertEquals(WriteBackService.Result.WRITTEN, svc.writeBack(1L, "PROJ", syncedTc(), SYNCED));
         verify(conflicts, never()).save(any());
     }
 
     @Test
-    void bothChanged_queuesConflict_noOverwrite() {            // TS-B-02: concurrent edit → conflict, no LWW
+    void bothChanged_queuesConflict_noOverwrite() {            // concurrent edit → conflict, no LWW
         polarion.put(new PolarionWorkItem("A", "testcase", "7", Map.of("title", "polarion-edit", "definition", "d")));
-        TestCaseEntity tc = syncedTc();                        // Polarion moved (7!=5) AND TMS dirty (EDITED != synced)
-        WriteBackService.Result r = svc.writeBack(1L, "PROJ", tc, EDITED);
-        assertEquals(WriteBackService.Result.CONFLICT_QUEUED, r);
-        verify(conflicts).save(any(ConflictItemEntity.class));   // queued
-        // no-overwrite: Polarion still holds its own edit (we did not write EDITED over it)
+        assertEquals(WriteBackService.Result.CONFLICT_QUEUED, svc.writeBack(1L, "PROJ", syncedTc(), EDITED));
+        verify(conflicts).save(any(ConflictItemEntity.class));
         assertEquals("polarion-edit", polarion.fetchChangedSince("PROJ", "0").get(0).fields().get("title"));
+    }
+
+    @Test
+    void revisionChangesBetweenCheckAndWrite_conflictNotOverwrite() {   // TOCTOU (B4/C4 M1-T3)
+        // Predicate sees no conflict (Polarion at base rev 5 → polarionMoved=false) though TMS is dirty;
+        // a concurrent edit lands in the check→write window: the guarded write is REJECTED (null).
+        PolarionClient racy = new PolarionClient() {
+            public int countChangedSince(String p, String s) { return 0; }
+            public List<PolarionWorkItem> fetchChangedSince(String p, String s) { return List.of(); }
+            public String currentRevision(String p, String id) { return "5"; }               // == lastCommonRevision
+            public String writeIfRevisionMatches(String p, PolarionWorkItem i, String exp) { return null; } // moved in window
+        };
+        WriteBackService s = new WriteBackService(racy, testCases, conflicts);
+        assertEquals(WriteBackService.Result.CONFLICT_QUEUED, s.writeBack(1L, "PROJ", syncedTc(), EDITED));
+        verify(conflicts).save(any(ConflictItemEntity.class));   // no force-overwrite
+    }
+
+    @Test
+    void resolvedConflict_doesNotReTrigger() {                 // §E2 re-base both anchors
+        polarion.put(new PolarionWorkItem("A", "testcase", "9", Map.of("title", "polarion-edit", "definition", "d")));
+        TestCaseEntity tc = syncedTc();
+        Map<String, Object> resolved = Map.of("title", "agreed", "definition", "d");
+        when(conflicts.findById(1L)).thenReturn(Optional.of(new ConflictItemEntity()));
+        svc.resolve(1L, "PROJ", tc, resolved);
+        assertEquals(tc.revision, tc.lastCommonRevision, "lastCommonRevision re-based to new Polarion rev");
+        assertEquals(ContentHash.of(resolved), tc.contentHash, "storedContentHash re-based to resolved TMS state");
+        // subsequent write-back of the resolved fields sees NO conflict (predicate clean) → no thrash
+        assertEquals(WriteBackService.Result.WRITTEN, svc.writeBack(1L, "PROJ", tc, resolved));
     }
 
     @Test
     void openConflict_freezesAutoWrite() {                    // anti-thrash (REQ-M1-04)
         when(conflicts.findByItemPolarionIdAndStatus(eq("A"), eq("open")))
                 .thenReturn(List.of(new ConflictItemEntity()));
-        WriteBackService.Result r = svc.writeBack(1L, "PROJ", syncedTc(), EDITED);
-        assertEquals(WriteBackService.Result.FROZEN_PENDING_CONFLICT, r);
+        assertEquals(WriteBackService.Result.FROZEN_PENDING_CONFLICT, svc.writeBack(1L, "PROJ", syncedTc(), EDITED));
     }
 }

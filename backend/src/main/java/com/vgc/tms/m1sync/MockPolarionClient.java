@@ -55,8 +55,13 @@ public class MockPolarionClient implements PolarionClient {
     }
 
     @Override
-    public String write(String polarionProjectId, PolarionWorkItem item) {
-        // simulate Polarion assigning a new (higher) revision on write
+    public String writeIfRevisionMatches(String polarionProjectId, PolarionWorkItem item, String expectedRevision) {
+        // If-Match guard: reject if Polarion moved since the caller's check-read (TOCTOU close).
+        PolarionWorkItem cur = store.get(item.polarionId());
+        String curRev = cur == null ? null : cur.revision();
+        if (!java.util.Objects.equals(curRev, expectedRevision)) {
+            return null;   // concurrent edit landed in the window → caller queues a conflict, no overwrite
+        }
         long next = 0;
         for (PolarionWorkItem it : store.values()) next = Math.max(next, parse(it.revision()));
         String newRev = String.valueOf(next + 1);
