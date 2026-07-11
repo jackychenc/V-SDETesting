@@ -112,4 +112,26 @@ class ReadSyncServiceTest {
         // REQ-M1-06 §E4: the failed item is enqueued to the error queue, never silently dropped
         verify(errorQueue).enqueue(any(), eq("BAD"), any());
     }
+
+    @Test
+    void sync_toleratesImmutableFetchResult_andSortsDefensiveCopy() {   // B4/C1 robustness regression
+        // A real PolarionClient may back its result with an UNMODIFIABLE list (Stream.toList(),
+        // List.of(), List.copyOf(), Collections.unmodifiableList()). sync() must sort a DEFENSIVE COPY,
+        // never the caller-owned list, or it throws UnsupportedOperationException and crashes the sync.
+        // (Guards the fix for the immutable-list-sort bug the TS-B-03 faulty stub first surfaced.)
+        PolarionClient immutableClient = new PolarionClient() {
+            public int countChangedSince(String p, String s) { return 2; }
+            public List<PolarionWorkItem> fetchChangedSince(String p, String s) {
+                return List.of(tc("B", "2"), tc("A", "1"));   // immutable + deliberately out of revision order
+            }
+            public String currentRevision(String p, String id) { return null; }
+            public String writeIfRevisionMatches(String p, PolarionWorkItem i, String r) { return null; }
+        };
+        ReadSyncService s = new ReadSyncService(immutableClient, testCases, states, runs, errorQueue);
+        SyncRunEntity run = assertDoesNotThrow(() -> s.sync(1L, "PROJ"),
+                "immutable fetchChangedSince() return must not crash sync (defensive-copy sort)");
+        assertEquals(2, run.read);
+        assertEquals(2, run.written, "both items processed despite immutable input");
+        assertEquals(0, run.failed);
+    }
 }
