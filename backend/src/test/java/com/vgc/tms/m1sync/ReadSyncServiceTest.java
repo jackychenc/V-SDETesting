@@ -75,6 +75,8 @@ class ReadSyncServiceTest {
         PolarionClient faulty = new PolarionClient() {
             public int countChangedSince(String p, String s) { return 5; }             // independent count > 0
             public List<PolarionWorkItem> fetchChangedSince(String p, String s) { return List.of(); } // writes nothing
+            public String currentRevision(String p, String id) { return null; }
+            public String writeIfRevisionMatches(String p, PolarionWorkItem i, String r) { return null; }
         };
         ReadSyncService s = new ReadSyncService(faulty, testCases, states, runs, errorQueue);
         SyncRunEntity run = s.sync(1L, "PROJ");
@@ -101,7 +103,7 @@ class ReadSyncServiceTest {
         SyncStateEntity st = new SyncStateEntity(); st.projectId = 1L; st.watermark = "0"; st.overlapLookback = 0;
         when(states.findById(1L)).thenReturn(Optional.of(st));
         // item at rev 2 fails to persist; rev 1 ok, rev 3 ok (but above the failure)
-        when(testCases.save(argThat(e -> e != null && "BAD".equals(e.polarionId()))))
+        when(testCases.save(argThat((TestCaseEntity e) -> e != null && "BAD".equals(e.polarionId))))
                 .thenThrow(new RuntimeException("simulated persist failure"));
         polarion.put(tc("OK1", "1")); polarion.put(tc("BAD", "2")); polarion.put(tc("OK3", "3"));
         SyncRunEntity run = svc.sync(1L, "PROJ");
