@@ -26,24 +26,47 @@ jobs:
       - name: Set up Gradle (pinned)
         uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.10" }
-      # Emit compile/build errors as ::error:: workflow annotations — these are readable via the
-      # PUBLIC check-runs annotations API (logs=403, artifacts=401 to agents; annotations are public).
-      - name: build (compile + test), annotate errors
+
+      # STEP-A: compile gate. Compile errors are the cheapest to surface, so fail fast here.
+      - name: compile (main + test)
         working-directory: backend
         run: |
           set -o pipefail
-          if ! gradle compileJava compileTestJava test --no-daemon --stacktrace > build-output.txt 2>&1; then
-            grep -nE "\.java:[0-9]+:|error:|cannot find symbol|No qualifying bean of type|NoSuchBeanDefinitionException|UnsatisfiedDependencyException|Failed to load ApplicationContext|Parameter .* required a bean|Error creating bean with name|expected at least 1 bean|Wanted but not invoked|AssertionFailedError|expected:|but was:| > .* FAILED" build-output.txt \
-              | head -40 | while IFS= read -r line; do echo "::error::$line"; done
-            # dump a 25-line window around the first root-cause exception for full context
-            FIRST=$(grep -nE "No qualifying bean of type|UnsatisfiedDependencyException|Caused by:.*Exception|ApplicationContextException" build-output.txt | head -1 | cut -d: -f1)
-            if [ -n "$FIRST" ]; then
-              echo "::group::root-cause context"
-              sed -n "$((FIRST>3?FIRST-3:1)),$((FIRST+22))p" build-output.txt | while IFS= read -r l; do echo "::error::CTX $l"; done
-              echo "::endgroup::"
-            fi
+          if ! gradle compileJava compileTestJava --no-daemon --stacktrace > compile.txt 2>&1; then
+            grep -nE "\.java:[0-9]+:|error:|cannot find symbol|incompatible types" compile.txt \
+              | head -20 | while IFS= read -r l; do echo "::error::COMPILE $l"; done
             exit 1
           fi
+
+      # STEP-B: two INDEPENDENT test lanes so the M1 (plain-JUnit) and RBAC (@WebMvcTest slice)
+      # failures never share an annotation budget (team consensus 2026-07-12: Cindy/C1/B4).
+      # Each lane parses its OWN JUnit result XML — the <error>/<failure> stacktrace text holds the
+      # EXACT root cause (e.g. "No qualifying bean of type '...'"), emitted FIRST so it is never
+      # buried below the caps GitHub applies to the public check-runs annotations API.
+      - name: test lanes (M1 unit + RBAC slice), annotate each root cause
+        working-directory: backend
+        run: |
+          rc=0
+          annotate() {  # $1=prefix  $2=results-glob  $3=console-log
+            grep -hoE "No qualifying bean of type '[^']*'|NoSuchBeanDefinitionException: [^<\"]{0,200}|UnsatisfiedDependencyException: [^<\"]{0,200}|Error creating bean with name '[^']*'[^<\"]{0,160}|Parameter [0-9]+ of [^<\"]{0,160}required a bean|Failed to load ApplicationContext[^<\"]{0,160}|IllegalStateException: [^<\"]{0,200}|AssertionFailedError[^<\"]{0,200}|expected: *<[^>]*> *but was: *<[^>]*>|NullPointerException[^<\"]{0,160}|Wanted but not invoked[^<\"]{0,160}" $2 2>/dev/null \
+              | head -12 | while IFS= read -r l; do echo "::error::$1 $l"; done
+            grep -nE "> .* FAILED" "$3" | head -8 | while IFS= read -r l; do echo "::error::$1 $l"; done
+          }
+          echo "::group::M1 unit lane (plain JUnit — no Spring context)"
+          if gradle test --tests 'com.vgc.tms.m1sync.*' --no-daemon --rerun-tasks --stacktrace > m1.txt 2>&1; then
+            echo "M1 unit lane PASS"
+          else
+            rc=1; echo "::error::M1 lane FAILED — root cause:"; annotate "M1" "build/test-results/test/TEST-com.vgc.tms.m1sync.*.xml" m1.txt
+          fi
+          echo "::endgroup::"
+          echo "::group::RBAC slice lane (Spring @WebMvcTest)"
+          if gradle test --tests 'com.vgc.tms.m5admin.*' --no-daemon --rerun-tasks --stacktrace > rbac.txt 2>&1; then
+            echo "RBAC slice lane PASS"
+          else
+            rc=1; echo "::error::RBAC lane FAILED — missing bean / context-load root cause:"; annotate "RBAC" "build/test-results/test/TEST-com.vgc.tms.m5admin.*.xml" rbac.txt
+          fi
+          echo "::endgroup::"
+          exit $rc
 
   logic-verify:
     runs-on: ubuntu-latest
