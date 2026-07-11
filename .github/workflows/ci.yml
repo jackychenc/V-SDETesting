@@ -38,35 +38,22 @@ jobs:
             exit 1
           fi
 
-      # STEP-B: two INDEPENDENT test lanes so the M1 (plain-JUnit) and RBAC (@WebMvcTest slice)
-      # failures never share an annotation budget (team consensus 2026-07-12: Cindy/C1/B4).
-      # Each lane parses its OWN JUnit result XML — the <error>/<failure> stacktrace text holds the
-      # EXACT root cause (e.g. "No qualifying bean of type '...'"), emitted FIRST so it is never
-      # buried below the caps GitHub applies to the public check-runs annotations API.
-      - name: test lanes (M1 unit + RBAC slice), annotate each root cause
+      # STEP-B: run the FULL suite (no --tests glob → every test class runs, incl. root-package
+      # SecurityConfigTest; a glob split would silently skip anything outside its packages). On failure
+      # we parse EVERY JUnit result XML per-class — the <failure>/<error> message + type carries the
+      # EXACT root cause (e.g. "No qualifying bean of type '...'"), emitted per class so the M1 / RBAC /
+      # security failures stay disambiguated (the class name is in each annotation) without a coverage gap.
+      - name: test (full suite), annotate each failing class's root cause
         working-directory: backend
         run: |
-          rc=0
-          annotate() {  # $1=prefix  $2=results-glob  $3=console-log
-            grep -hoE "No qualifying bean of type '[^']*'|NoSuchBeanDefinitionException: [^<\"]{0,200}|UnsatisfiedDependencyException: [^<\"]{0,200}|Error creating bean with name '[^']*'[^<\"]{0,160}|Parameter [0-9]+ of [^<\"]{0,160}required a bean|Failed to load ApplicationContext[^<\"]{0,160}|IllegalStateException: [^<\"]{0,200}|AssertionFailedError[^<\"]{0,200}|expected: *<[^>]*> *but was: *<[^>]*>|NullPointerException[^<\"]{0,160}|Wanted but not invoked[^<\"]{0,160}" $2 2>/dev/null \
-              | head -12 | while IFS= read -r l; do echo "::error::$1 $l"; done
-            grep -nE "> .* FAILED" "$3" | head -8 | while IFS= read -r l; do echo "::error::$1 $l"; done
-          }
-          echo "::group::M1 unit lane (plain JUnit — no Spring context)"
-          if gradle test --tests 'com.vgc.tms.m1sync.*' --no-daemon --rerun-tasks --stacktrace > m1.txt 2>&1; then
-            echo "M1 unit lane PASS"
-          else
-            rc=1; echo "::error::M1 lane FAILED — root cause:"; annotate "M1" "build/test-results/test/TEST-com.vgc.tms.m1sync.*.xml" m1.txt
+          set -o pipefail
+          if gradle test --no-daemon --stacktrace > test.txt 2>&1; then
+            echo "all test classes PASS"; exit 0
           fi
-          echo "::endgroup::"
-          echo "::group::RBAC slice lane (Spring @WebMvcTest)"
-          if gradle test --tests 'com.vgc.tms.m5admin.*' --no-daemon --rerun-tasks --stacktrace > rbac.txt 2>&1; then
-            echo "RBAC slice lane PASS"
-          else
-            rc=1; echo "::error::RBAC lane FAILED — missing bean / context-load root cause:"; annotate "RBAC" "build/test-results/test/TEST-com.vgc.tms.m5admin.*.xml" rbac.txt
-          fi
-          echo "::endgroup::"
-          exit $rc
+          echo "::error::backend tests FAILED — per-class root cause below"
+          python3 ci/annotate-test-failures.py
+          echo "::group::console tail"; tail -30 test.txt; echo "::endgroup::"
+          exit 1
 
   logic-verify:
     runs-on: ubuntu-latest
