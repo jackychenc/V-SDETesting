@@ -53,7 +53,10 @@ public class ReadSyncService {
         // B4#1 — INDEPENDENT delta probe (separate query path from the extract), STRICT bound.
         int expectedDelta = polarion.countChangedSince(polarionProjectId, state.watermark);
 
-        List<PolarionWorkItem> items = polarion.fetchChangedSince(polarionProjectId, fetchSince);
+        // Defensive copy: never sort the client-owned list in place. A real PolarionClient may return an
+        // immutable list (e.g. Stream.toList(), List.of(), Collections.unmodifiableList) → in-place sort
+        // throws UnsupportedOperationException and crashes the sync. (Caught by silentFailure_* guard test.)
+        List<PolarionWorkItem> items = new ArrayList<>(polarion.fetchChangedSince(polarionProjectId, fetchSince));
         items.sort(Comparator.comparingLong(i -> parse(i.revision())));   // process in revision order
 
         int written = 0, failed = 0;
