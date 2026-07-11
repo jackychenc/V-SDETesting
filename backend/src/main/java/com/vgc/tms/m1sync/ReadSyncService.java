@@ -100,8 +100,12 @@ public class ReadSyncService {
 
     /** B4 anomaly signals (alertable). zero_change = "success, wrote nothing" while upstream had deltas. */
     private String detectAnomalies(Long projectId, int written, int failed, int expectedDelta) {
+        // Coverage division (B4/C4, auditable): per-run zero_change detects failures on NEW upstream
+        // changes only. Silent write-failure/drift on an ALREADY-SYNCED item (incl. the overlap re-scan
+        // region, revision <= watermark) is NOT a zero_change concern — it is caught by the on-demand
+        // reconcile checksum (contentHash Polarion<->TMS), a Sprint-2 responsibility. No blind spot.
         StringBuilder flags = new StringBuilder();
-        if (written == 0 && expectedDelta > 0) append(flags, "zero_change");   // relies on independent probe (B4#1)
+        if (written == 0 && expectedDelta > 0) append(flags, "zero_change");   // relies on independent+strict probe (B4#1)
         if (failed > 0) {
             SyncRunEntity prev = runs.findFirstByProjectIdOrderByStartedAtDesc(projectId);
             if (prev != null && prev.failed > 0) append(flags, "consecutive_failure");
