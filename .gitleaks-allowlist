@@ -1,0 +1,13 @@
+# gitleaks allowlist — explicit, auditable exceptions (C4 secret-scan gate, task #8).
+# Closes C4 review Finding F1: docker-compose local-dev PostgreSQL password.
+# Justification: local-dev compose ONLY, non-prod, env-overridable default
+# (${POSTGRES_PASSWORD:-...}). Staging/prod/K8s inject from the secret store (secretRef),
+# never this literal (verified: application.yml + k8s/* use env/secretRef only).
+[allowlist]
+description = "local-dev-only non-prod defaults"
+paths = [
+  '''docker-compose\.yml''',
+]
+regexes = [
+  '''devonly-change-me''',
+]
