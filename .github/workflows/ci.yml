@@ -1,0 +1,37 @@
+# TMS CI — enforced gate (C4 secret-scan + B3 unit tests + logic-port). Runs on push/PR.
+# Wires the pipeline agreed with C1 (#7/#12) + C4 (#8/#13). Human Senior Dev merges.
+name: ci
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: gitleaks (secret scan, honors .gitleaks-allowlist) # C4 NFR-SEC-01
+        uses: gitleaks/gitleaks-action@v2
+        env: { GITLEAKS_CONFIG: .gitleaks-allowlist }
+
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - name: Unit tests (JUnit — RBAC + M1 read-sync incl. B4 guards)
+        working-directory: backend
+        run: gradle test --no-daemon
+
+  logic-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: M1 read-sync logic verification (5/5)
+        run: python3 docs/verify_read_sync_logic.py
