@@ -23,10 +23,11 @@
 ## 3. Read-sync algorithm (REQ-M1-02, incremental, idempotent)
 ```
 1. read watermark = SyncState[proj].watermark   (0 on first run → full read)
-2. expectedDelta  = PolarionClient.countChangedSince(sinceRev)   // ⚠️ B4#1: GENUINELY INDEPENDENT
-                    //   count/query call — NOT fetchChangedSince(...).size(). Separate read path so a
-                    //   "success/writes-nothing" failure can't suppress BOTH (else zero_change never fires).
-3. items          = PolarionClient.fetchChangedSince(sinceRev)   // sinceRev = watermark - overlapLookback (see note)
+2. expectedDelta  = PolarionClient.countChangedSince(watermark)  // ⚠️ B4#1 INDEPENDENT + STRICT bound.
+                    //   INDEPENDENT: own count/query, NOT fetchChangedSince(...).size() — anti-self-masking.
+                    //   STRICT (from watermark, NOT watermark-overlap): counts genuinely-new upstream only,
+                    //   so an idle run with overlap re-fetches can't false-fire zero_change (B4 catch).
+3. items          = PolarionClient.fetchChangedSince(watermark - overlapLookback)  // overlap bound for fetch (boundary safety)
 4. for each item: map via ACL → idempotent upsert keyed on polarionId          // safe re-run (REQ-M1-06)
                   set contentHash, sourceRevision, lastSyncedAt (B4 fields); track per-item success/fail
 5. advance watermark:  // ⚠️ B4#2: do NOT jump past failures (REQ-M1-06 "nothing dropped silently")

@@ -83,6 +83,18 @@ class ReadSyncServiceTest {
     }
 
     @Test
+    void overlapItems_noChange_noFalseZeroChange() {   // B4 idle-run guard: strict-bound expectedDelta
+        // watermark at 5 with overlapLookback 2 → fetch re-reads rev>3 (overlap), but NO genuinely-new
+        // upstream revision (nothing > 5). Strict expectedDelta must be 0 → zero_change must NOT fire.
+        SyncStateEntity st = new SyncStateEntity(); st.projectId = 1L; st.watermark = "5"; st.overlapLookback = 2;
+        when(states.findById(1L)).thenReturn(Optional.of(st));
+        polarion.put(tc("D", "4")); polarion.put(tc("E", "5"));  // both <= watermark; overlap re-fetch only
+        SyncRunEntity run = svc.sync(1L, "PROJ");
+        assertEquals(0, run.expectedDelta, "strict probe: no genuinely-new upstream revision");
+        assertFalse(run.anomalyFlags.contains("zero_change"), "idle run must not false-fire zero_change");
+    }
+
+    @Test
     void watermarkStopsAtContiguousSuccessPrefix_onFailure() {     // REQ-M1-06 (B4#2)
         SyncStateEntity st = new SyncStateEntity(); st.projectId = 1L; st.watermark = "0"; st.overlapLookback = 0;
         when(states.findById(1L)).thenReturn(Optional.of(st));

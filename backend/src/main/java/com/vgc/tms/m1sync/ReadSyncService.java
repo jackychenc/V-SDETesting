@@ -41,12 +41,16 @@ public class ReadSyncService {
         SyncStateEntity state = states.findById(projectId).orElseGet(() -> {
             SyncStateEntity s = new SyncStateEntity(); s.projectId = projectId; s.watermark = "0"; return s;
         });
-        String sinceRev = lookbackFrom(state.watermark, state.overlapLookback);
+        // B4 catch — DECOUPLE the two bounds:
+        //  - anomaly probe uses the STRICT watermark (genuinely-new upstream revisions only), so an idle
+        //    run with overlap re-fetches can't false-fire zero_change (avoids alert fatigue).
+        //  - the extract uses watermark - overlapLookback for idempotency/boundary safety (re-fetch margin).
+        String fetchSince = lookbackFrom(state.watermark, state.overlapLookback);
 
-        // B4#1 — INDEPENDENT delta probe (separate query path from the extract below).
-        int expectedDelta = polarion.countChangedSince(polarionProjectId, sinceRev);
+        // B4#1 — INDEPENDENT delta probe (separate query path from the extract), STRICT bound.
+        int expectedDelta = polarion.countChangedSince(polarionProjectId, state.watermark);
 
-        List<PolarionWorkItem> items = polarion.fetchChangedSince(polarionProjectId, sinceRev);
+        List<PolarionWorkItem> items = polarion.fetchChangedSince(polarionProjectId, fetchSince);
         items.sort(Comparator.comparingLong(i -> parse(i.revision())));   // process in revision order
 
         int written = 0, failed = 0;
