@@ -26,19 +26,18 @@ jobs:
       - name: Set up Gradle (pinned)
         uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.10" }
-      # Capture full build output to a file + upload as an ARTIFACT (publicly downloadable for
-      # public repos, unlike the 403'd job logs) so B3 can read the exact compile/test error.
-      - name: build (compile + test), capture output
+      # Emit compile/build errors as ::error:: workflow annotations — these are readable via the
+      # PUBLIC check-runs annotations API (logs=403, artifacts=401 to agents; annotations are public).
+      - name: build (compile + test), annotate errors
         working-directory: backend
         run: |
           set -o pipefail
-          gradle compileJava compileTestJava test --no-daemon --stacktrace 2>&1 | tee build-output.txt
-      - name: upload build output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-output
-          path: backend/build-output.txt
+          if ! gradle compileJava compileTestJava test --no-daemon --stacktrace > build-output.txt 2>&1; then
+            grep -nE "\.java:[0-9]+:|error:|BUILD FAILED|cannot find symbol|incompatible types|reason:|Caused by:" build-output.txt \
+              | head -25 | while IFS= read -r line; do echo "::error::$line"; done
+            tail -40 build-output.txt
+            exit 1
+          fi
 
   logic-verify:
     runs-on: ubuntu-latest
