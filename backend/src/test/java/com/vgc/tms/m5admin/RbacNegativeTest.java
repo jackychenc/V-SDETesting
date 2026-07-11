@@ -20,7 +20,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * and every denial is audit-logged (REQ-M5-03).
  */
 @WebMvcTest(SyncConfigController.class)
-@Import(SecurityConfig.class)
+// Import the deny-audit listener into the slice (a @Component; not auto-loaded by @WebMvcTest) so the
+// AuthorizationDeniedEvent published by SecurityConfig's AuthorizationEventPublisher records the DENY audit.
+@Import({SecurityConfig.class, AuthorizationDeniedAuditListener.class})
 class RbacNegativeTest {
 
     @Autowired MockMvc mvc;

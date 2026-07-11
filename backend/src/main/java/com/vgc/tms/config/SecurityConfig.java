@@ -1,8 +1,11 @@
 package com.vgc.tms.config;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authorization.AuthorizationEventPublisher;
+import org.springframework.security.authorization.SpringAuthorizationEventPublisher;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -24,6 +27,16 @@ public class SecurityConfig {
 
     /** Roles (B1). Spring authorities use the ROLE_ prefix. */
     public enum Role { VIEWER, TESTER, TEST_LEAD, ADMINISTRATOR }
+
+    /**
+     * Publishes AuthorizationDeniedEvent on every denial so {@link com.vgc.tms.m5admin.AuthorizationDeniedAuditListener}
+     * records the DENY audit (REQ-M5-03). Without this bean, Spring Security does NOT emit deny events →
+     * denials would 403 but never be audited (the real bug behind the RBAC negative-audit gap).
+     */
+    @Bean
+    public AuthorizationEventPublisher authorizationEventPublisher(ApplicationEventPublisher publisher) {
+        return new SpringAuthorizationEventPublisher(publisher);
+    }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
