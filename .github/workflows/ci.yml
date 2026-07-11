@@ -26,7 +26,15 @@ jobs:
       - name: Set up Gradle (pinned)
         uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.10" }
-      - name: Unit tests (JUnit — RBAC + M1 read-sync/reconcile/bidi incl. B4 guards)
+      # Split into named steps so the FAILING STEP NAME (visible at job level, no log content
+      # needed) tells us compile-main vs compile-test vs run-tests — works around the 403 log access.
+      - name: STEP-A compile main sources
+        working-directory: backend
+        run: gradle compileJava --no-daemon --stacktrace
+      - name: STEP-B compile test sources
+        working-directory: backend
+        run: gradle compileTestJava --no-daemon --stacktrace
+      - name: STEP-C run unit tests (JUnit — RBAC + M1 read-sync/reconcile/bidi/error-queue)
         working-directory: backend
         run: gradle test --no-daemon --stacktrace --info
 
