@@ -34,8 +34,10 @@ public class SyncController {
         String polProj = polarionProject.isBlank() ? String.valueOf(projectId) : polarionProject;
         ReconcileService.ReconcileReport r = reconcile.reconcile(projectId, polProj);
         return ResponseEntity.ok(Map.of(
-                "matched", r.matched(), "mismatched", r.mismatched(), "missing", r.missing(),
-                "driftedPolarionIds", r.driftedPolarionIds(), "clean", r.clean(), "asOf", r.asOf()));
+                "matched", r.matched(), "mismatched", r.mismatched(),
+                "driftedPolarionIds", r.driftedPolarionIds(),
+                "missingInTMS", r.missingInTMS(), "missingInPolarion", r.missingInPolarion(),
+                "clean", r.clean(), "asOf", r.asOf()));
     }
 
     /** POST /api/sync/{projectId}/run — trigger an incremental read-sync (REQ-M1-02). 202 + runId. */

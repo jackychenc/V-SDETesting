@@ -22,6 +22,14 @@ tms:
     sync:
       interval: ${SYNC_INTERVAL:PT15M} # default 15 min (REQ-M1-02)
 
+# Reconcile SLA (contract v1.3 §E3) — non-null defaults => SLA ON out of the box.
+# Overridable per-project via versioned SyncConfig (REQ-M5-04).
+reconcile:
+  fullScan:
+    cron: ${RECONCILE_FULLSCAN_CRON:0 30 2 * * *}   # Tier-3 nightly off-peak → drift ≤24h
+  rowCount:
+    interval: ${RECONCILE_ROWCOUNT_INTERVAL:PT1H}    # Tier-2 hourly count-only → gross drift ≤1h
+
 management:
   endpoints:
     web:

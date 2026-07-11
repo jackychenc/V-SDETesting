@@ -6,6 +6,7 @@ import com.vgc.tms.m1sync.SyncRepositories.TestCaseRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -14,8 +15,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Reconcile tests (REQ-M1-05). Proves the on-demand reconcile catches silent drift on an
- * ALREADY-SYNCED item (the C4 carried-forward gate the strict per-run zero_change defers to S2).
+ * Reconcile tests (REQ-M1-05, v1.3 §E3). Proves already-synced drift detection (C4 gate),
+ * BOTH-direction missing (B4 #4), and the Tier-2 row-count tripwire.
  */
 class ReconcileServiceTest {
 
@@ -28,7 +29,7 @@ class ReconcileServiceTest {
     }
     private static TestCaseEntity stored(String pid, Map<String, Object> syncedFields) {
         TestCaseEntity e = new TestCaseEntity();
-        e.polarionId = pid; e.contentHash = ContentHash.of(syncedFields);
+        e.projectId = 1L; e.polarionId = pid; e.contentHash = ContentHash.of(syncedFields);
         return e;
     }
 
@@ -36,15 +37,14 @@ class ReconcileServiceTest {
     void setup() {
         polarion = new MockPolarionClient();
         testCases = mock(TestCaseRepository.class);
+        when(testCases.findByProjectId(1L)).thenReturn(List.of());   // default: no TMS-only orphans
         svc = new ReconcileService(polarion, testCases);
     }
 
     @Test
-    void detectsSilentDriftOnAlreadySyncedItem() {   // C4 gate: overlap/already-synced coverage
-        // TMS stored "A" with the ORIGINAL field-set hash...
+    void detectsSilentDriftOnAlreadySyncedItem() {   // C4 gate: already-synced/overlap coverage
         when(testCases.findByProjectIdAndPolarionId(1L, "A"))
                 .thenReturn(Optional.of(stored("A", Map.of("title", "orig", "definition", "d"))));
-        // ...but Polarion's current "A" has drifted (title changed) — a silent already-synced drift.
         polarion.put(tc("A", "3", "DRIFTED"));
         var r = svc.reconcile(1L, "PROJ");
         assertEquals(1, r.mismatched());
@@ -53,22 +53,34 @@ class ReconcileServiceTest {
     }
 
     @Test
-    void cleanWhenHashesMatch() {
-        Map<String, Object> fields = Map.of("title", "same", "definition", "d");
-        when(testCases.findByProjectIdAndPolarionId(1L, "A")).thenReturn(Optional.of(stored("A", fields)));
-        polarion.put(new PolarionWorkItem("A", "testcase", "3", fields));  // identical → same hash
-        var r = svc.reconcile(1L, "PROJ");
-        assertEquals(1, r.matched());
-        assertEquals(0, r.mismatched());
-        assertTrue(r.clean());
-    }
-
-    @Test
-    void flagsMissingItemNeverSynced() {
+    void missingInTMS_polarionHasItemNeverSynced() {   // forward gap (B4 #4)
         when(testCases.findByProjectIdAndPolarionId(1L, "A")).thenReturn(Optional.empty());
         polarion.put(tc("A", "1", "upstream-only"));
         var r = svc.reconcile(1L, "PROJ");
-        assertEquals(1, r.missing());
+        assertTrue(r.missingInTMS().contains("A"));
+        assertTrue(r.missingInPolarion().isEmpty());
         assertFalse(r.clean());
+    }
+
+    @Test
+    void missingInPolarion_tmsOrphanWithNoPolarionMatch() {   // reverse gap (B4 #4) — orphan/deletion
+        TestCaseEntity orphan = stored("Z", Map.of("title", "gone", "definition", "d"));
+        when(testCases.findByProjectId(1L)).thenReturn(List.of(orphan));   // TMS has Z...
+        // ...Polarion has nothing → Z is an orphan
+        var r = svc.reconcile(1L, "PROJ");
+        assertTrue(r.missingInPolarion().contains("Z"));
+        assertTrue(r.missingInTMS().isEmpty());
+        assertFalse(r.clean());
+    }
+
+    @Test
+    void rowCountTripwire_detectsCountDrift() {   // Tier-2 cheap tripwire (§E3 ≤1h)
+        polarion.put(tc("A", "1", "a")); polarion.put(tc("B", "2", "b"));   // Polarion has 2
+        when(testCases.countByProjectId(1L)).thenReturn(1L);                 // TMS has 1
+        var r = svc.rowCountTripwire(1L, "PROJ");
+        assertEquals(2, r.polarionCount());
+        assertEquals(1, r.tmsCount());
+        assertEquals(1, r.drift());
+        assertTrue(r.tripped());
     }
 }

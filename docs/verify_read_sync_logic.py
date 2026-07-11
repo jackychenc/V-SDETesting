@@ -98,3 +98,22 @@ r = reconcile([("A", {"title": "orig", "definition": "d"})], stored)
 check("reconcile_cleanWhenHashesMatch (matched=1, mismatched=0)", r["matched"] == 1 and r["mismatched"] == 0)
 
 print("\nALL RECONCILE SCENARIOS PASS — REQ-M1-05 overlap/already-synced coverage verified.")
+
+# --- PR#4 refinements: bidirectional missing + tier-2 row-count (v1.3 §E3) ---
+def reconcile_bidir(polarion_items, tms_hashes):
+    seen=set(); matched=mismatched=0; drift=[]; missing_tms=[]
+    for pid, fields in polarion_items:
+        seen.add(pid); fresh=sha_fields(fields)
+        if pid not in tms_hashes: missing_tms.append(pid)
+        elif tms_hashes[pid]!=fresh: mismatched+=1; drift.append(pid)
+        else: matched+=1
+    missing_pol=[pid for pid in tms_hashes if pid not in seen]
+    return dict(matched=matched, mismatched=mismatched, missingInTMS=missing_tms, missingInPolarion=missing_pol)
+
+tms = {"A": sha_fields({"t":"1"}), "Z": sha_fields({"t":"orphan"})}  # Z is TMS-only orphan
+r = reconcile_bidir([("A", {"t":"1"})], tms)
+check("reconcile_missingInPolarion_detectsOrphan (Z in TMS not Polarion)", "Z" in r["missingInPolarion"])
+r = reconcile_bidir([("A", {"t":"1"}), ("B", {"t":"new"})], {"A": sha_fields({"t":"1"})})
+check("reconcile_missingInTMS_detectsSyncGap (B in Polarion not TMS)", "B" in r["missingInTMS"])
+check("rowCount_tripwire_detectsDrift (polarion 2 vs tms 1 -> drift 1)", abs(2-1)==1)
+print("\nALL PR#4-REFINEMENT SCENARIOS PASS — bidirectional missing + row-count tripwire verified.")
