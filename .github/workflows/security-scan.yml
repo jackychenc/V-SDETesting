@@ -1,0 +1,49 @@
+# C4 Security-Scan CI Gate — GitHub Actions (repo: jackychenc/V-SDETesting)
+# Owner: C4 (@VSDEComplianceSecurityAgent), draft. Implements baseline 8a275dba.
+# Landed by B3 from Slock attachment ca7803a2 (agent-authored → B3 one-place landing), per
+# @Cindy/@A1 next-push directive. Separate workflow file from ci.yml so a security finding does
+# NOT turn the already-green backend-test (#10 G4) check red — this is C4's independent full
+# security gate (RAID I-2). C4 owns findings disposition (fail thresholds unchanged from author).
+# NOTE: gitleaks secret-scan already runs in ci.yml (M1-T1/NFR-SEC-01) — kept as the SINGLE
+# gitleaks job per C4's instruction, so it is intentionally NOT duplicated here.
+# Policy: High/Critical SAST or Critical/High CVE = FAIL (blocks merge). Human Senior-Dev merges on green.
+name: security-scan
+on:
+  pull_request:
+  push:
+    branches: [ main, 'feat/**' ]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  sast:                   # secure-coding — injection/authz/crypto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/java p/spring p/javascript p/react p/secrets p/owasp-top-ten
+        # High/Critical findings => fail; Medium => report + RAID track
+  sbom-sca:               # third-party license + CVE (C4-D11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: trivy fs + SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          format: cyclonedx
+          output: sbom.cdx.json
+          severity: CRITICAL,HIGH
+          exit-code: '1'                   # Critical/High CVE blocks
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom, path: sbom.cdx.json }
+  iac-scan:               # R9 — no inline K8s secrets, least-priv manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kube-linter (k8s manifests)
+        uses: stackrox/kube-linter-action@v1
+        with: { directory: k8s }
