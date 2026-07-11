@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -25,13 +26,15 @@ public class ReadSyncService {
     private final TestCaseRepository testCases;
     private final SyncStateRepository states;
     private final SyncRunRepository runs;
+    private final ErrorQueueService errorQueue;
 
     public ReadSyncService(PolarionClient polarion, TestCaseRepository testCases,
-                           SyncStateRepository states, SyncRunRepository runs) {
+                           SyncStateRepository states, SyncRunRepository runs, ErrorQueueService errorQueue) {
         this.polarion = polarion;
         this.testCases = testCases;
         this.states = states;
         this.runs = runs;
+        this.errorQueue = errorQueue;
     }
 
     /** Run one incremental read-sync for a project. On-demand (POST /run) or scheduled (REQ-M1-02). */
@@ -56,6 +59,7 @@ public class ReadSyncService {
         int written = 0, failed = 0;
         String newWatermark = state.watermark;
         boolean contiguous = true;                                        // B4#2 no-skip-on-failure
+        List<String[]> failedItems = new ArrayList<>();                   // {polarionId, message} for the error queue
         for (PolarionWorkItem item : items) {
             try {
                 if ("testcase".equalsIgnoreCase(item.type())) upsertTestCase(projectId, item);
@@ -65,6 +69,7 @@ public class ReadSyncService {
             } catch (RuntimeException ex) {
                 failed++;
                 contiguous = false;                                       // stop advancing; item re-fetches next cycle
+                failedItems.add(new String[]{item.polarionId(), ex.getMessage()}); // REQ-M1-06: never drop silently
             }
         }
 
@@ -80,7 +85,11 @@ public class ReadSyncService {
 
         state.watermark = newWatermark;
         states.save(state);
-        return runs.save(run);
+        SyncRunEntity saved = runs.save(run);
+
+        // REQ-M1-06 §E4: every failed item goes to the error queue (retried w/ backoff), never dropped.
+        for (String[] f : failedItems) errorQueue.enqueue(saved.id, f[0], f[1]);
+        return saved;
     }
 
     /** Idempotent upsert keyed on (projectId, polarionId) — safe re-run (REQ-M1-06). */

@@ -142,3 +142,19 @@ resolved = {"title":"agreed"}; new_rev="10"; rebased_hash=sha_fields(resolved)
 check("resolvedConflict_doesNotReTrigger",
       write_back_guarded(new_rev, new_rev, resolved, rebased_hash, rev_at_write=new_rev) == "WRITTEN")
 print("\nALL PR#5-REFINEMENT SCENARIOS PASS — TOCTOU revision-guard + resolve re-base verified.")
+
+# --- PR#6 error-queue (REQ-M1-06 §E4): retry/backoff, no silent drop ---
+MAX_RETRIES = 5
+def record_attempt(retry_count, status, succeeded):
+    if succeeded: return (retry_count, "resolved")
+    retry_count += 1
+    return (retry_count, "terminal" if retry_count >= MAX_RETRIES else "retrying")
+def backoff(retry_count): return 30 * (2 ** retry_count)
+
+# failed item enqueued (never dropped) then retried to terminal (still present)
+rc, st = 0, "open"
+for _ in range(MAX_RETRIES): rc, st = record_attempt(rc, st, False)
+check("errorqueue_retriesThenTerminal_notDropped", rc == MAX_RETRIES and st == "terminal")
+check("errorqueue_successResolves", record_attempt(2, "retrying", True) == (2, "resolved"))
+check("errorqueue_backoffExponential", backoff(0)==30 and backoff(1)==60 and backoff(2)==120)
+print("\nALL ERROR-QUEUE SCENARIOS PASS — REQ-M1-06 retry/backoff no-silent-drop verified.")

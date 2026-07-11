@@ -1,11 +1,13 @@
 package com.vgc.tms.m1sync;
 
+import com.vgc.tms.m1sync.SyncEntities.ErrorItemEntity;
 import com.vgc.tms.m1sync.SyncEntities.SyncRunEntity;
 import com.vgc.tms.m1sync.SyncRepositories.SyncRunRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,11 +22,20 @@ public class SyncController {
     private final ReadSyncService readSync;
     private final SyncRunRepository runs;
     private final ReconcileService reconcile;
+    private final ErrorQueueService errorQueue;
 
-    public SyncController(ReadSyncService readSync, SyncRunRepository runs, ReconcileService reconcile) {
+    public SyncController(ReadSyncService readSync, SyncRunRepository runs, ReconcileService reconcile,
+                          ErrorQueueService errorQueue) {
         this.readSync = readSync;
         this.runs = runs;
         this.reconcile = reconcile;
+        this.errorQueue = errorQueue;
+    }
+
+    /** GET /api/sync/errors — outstanding failed items (open/retrying/terminal), never silently dropped (REQ-M1-06). */
+    @GetMapping("/errors")
+    public List<ErrorItemEntity> errors() {
+        return errorQueue.outstanding();
     }
 
     /** GET /api/sync/{projectId}/reconcile — on-demand full reconcile (REQ-M1-05); covers already-synced region. */

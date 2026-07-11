@@ -24,6 +24,7 @@ class ReadSyncServiceTest {
     private TestCaseRepository testCases;
     private SyncStateRepository states;
     private SyncRunRepository runs;
+    private ErrorQueueService errorQueue;
     private ReadSyncService svc;
 
     private static PolarionWorkItem tc(String id, String rev) {
@@ -41,7 +42,8 @@ class ReadSyncServiceTest {
         when(states.findById(anyLong())).thenReturn(Optional.empty());
         when(states.save(any())).thenAnswer(a -> a.getArgument(0));
         when(runs.save(any())).thenAnswer(a -> a.getArgument(0));
-        svc = new ReadSyncService(polarion, testCases, states, runs);
+        errorQueue = mock(ErrorQueueService.class);
+        svc = new ReadSyncService(polarion, testCases, states, runs, errorQueue);
     }
 
     @Test
@@ -74,7 +76,7 @@ class ReadSyncServiceTest {
             public int countChangedSince(String p, String s) { return 5; }             // independent count > 0
             public List<PolarionWorkItem> fetchChangedSince(String p, String s) { return List.of(); } // writes nothing
         };
-        ReadSyncService s = new ReadSyncService(faulty, testCases, states, runs);
+        ReadSyncService s = new ReadSyncService(faulty, testCases, states, runs, errorQueue);
         SyncRunEntity run = s.sync(1L, "PROJ");
         assertEquals(0, run.written);
         assertEquals(5, run.expectedDelta);
@@ -105,5 +107,7 @@ class ReadSyncServiceTest {
         SyncRunEntity run = svc.sync(1L, "PROJ");
         assertEquals(1, run.failed);
         assertEquals("1", st.watermark, "watermark must NOT jump past the failed item at rev 2");
+        // REQ-M1-06 §E4: the failed item is enqueued to the error queue, never silently dropped
+        verify(errorQueue).enqueue(any(), eq("BAD"), any());
     }
 }

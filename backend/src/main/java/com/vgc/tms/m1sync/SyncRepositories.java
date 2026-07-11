@@ -26,4 +26,8 @@ public final class SyncRepositories {
         List<ConflictItemEntity> findByItemPolarionIdAndStatus(String itemPolarionId, String status);
         List<ConflictItemEntity> findByStatus(String status);
     }
+
+    public interface ErrorItemRepository extends JpaRepository<ErrorItemEntity, Long> {
+        List<ErrorItemEntity> findByStatusIn(List<String> statuses);
+    }
 }

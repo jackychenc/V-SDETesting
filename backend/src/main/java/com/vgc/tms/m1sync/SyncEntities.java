@@ -45,6 +45,17 @@ public final class SyncEntities {
         @Column(columnDefinition = "jsonb") public String resolution;
     }
 
+    /** Failed sync item — retried with backoff, never silently dropped (REQ-M1-06, §E4). */
+    @Entity @Table(name = "error_item")
+    public static class ErrorItemEntity {
+        @Id @GeneratedValue(strategy = GenerationType.IDENTITY) public Long id;
+        @Column(name = "sync_run_id") public Long syncRunId;
+        @Column(name = "item_polarion_id", nullable = false) public String itemPolarionId;
+        @Column(columnDefinition = "text") public String message;
+        @Column(name = "retry_count", nullable = false) public int retryCount = 0;
+        @Column(nullable = false) public String status = "open";   // open | retrying | terminal | resolved
+    }
+
     /** Per-project incremental watermark (REQ-M1-02). watermark = highest contiguous all-success rev (B4#2). */
     @Entity @Table(name = "sync_state")
     public static class SyncStateEntity {
