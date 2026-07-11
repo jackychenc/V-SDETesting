@@ -66,6 +66,6 @@ public class SecurityConfig {
                 .anyRequest().denyAll()
             )
             .httpBasic(basic -> {});                       // pilot SSO/LDAP stub (REQ-M5-02); prod = ISSO IdP
-        return http;
+        return http.build();                               // build the SecurityFilterChain (was: returning HttpSecurity)
     }
 }
