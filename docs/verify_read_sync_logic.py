@@ -73,3 +73,28 @@ r = read_sync(p, "0", 0, fail_ids={"BAD"})
 check("watermarkStopsAtContiguousSuccessPrefix (failed=1, watermark=1)", r["failed"]==1 and r["watermark"]=="1")
 
 print("\nALL 5 SCENARIOS PASS — ReadSyncService core logic verified.")
+
+# --- PR#4 reconcile (REQ-M1-05): drift on already-synced item (C4 gate) ---
+def sha_fields(fields):
+    import hashlib
+    s = "".join(f"{k}={fields[k]};" for k in sorted(fields))
+    return hashlib.sha256(s.encode()).hexdigest()
+
+def reconcile(polarion_items, stored_hashes):
+    matched = mismatched = missing = 0; drifted = []
+    for pid, fields in polarion_items:
+        fresh = sha_fields(fields)
+        if pid not in stored_hashes: missing += 1
+        elif stored_hashes[pid] != fresh: mismatched += 1; drifted.append(pid)
+        else: matched += 1
+    return dict(matched=matched, mismatched=mismatched, missing=missing, drifted=drifted)
+
+# stored "A" with original fields; Polarion "A" drifted (title changed)
+stored = {"A": sha_fields({"title": "orig", "definition": "d"})}
+r = reconcile([("A", {"title": "DRIFTED", "definition": "d"})], stored)
+check("reconcile_detectsSilentDriftOnAlreadySyncedItem (mismatched=1, A drifted)",
+      r["mismatched"] == 1 and "A" in r["drifted"])
+r = reconcile([("A", {"title": "orig", "definition": "d"})], stored)
+check("reconcile_cleanWhenHashesMatch (matched=1, mismatched=0)", r["matched"] == 1 and r["mismatched"] == 0)
+
+print("\nALL RECONCILE SCENARIOS PASS — REQ-M1-05 overlap/already-synced coverage verified.")

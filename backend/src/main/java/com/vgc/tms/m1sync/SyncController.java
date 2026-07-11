@@ -19,10 +19,23 @@ public class SyncController {
 
     private final ReadSyncService readSync;
     private final SyncRunRepository runs;
+    private final ReconcileService reconcile;
 
-    public SyncController(ReadSyncService readSync, SyncRunRepository runs) {
+    public SyncController(ReadSyncService readSync, SyncRunRepository runs, ReconcileService reconcile) {
         this.readSync = readSync;
         this.runs = runs;
+        this.reconcile = reconcile;
+    }
+
+    /** GET /api/sync/{projectId}/reconcile — on-demand full reconcile (REQ-M1-05); covers already-synced region. */
+    @GetMapping("/{projectId}/reconcile")
+    public ResponseEntity<Map<String, Object>> reconcile(@PathVariable Long projectId,
+                                                         @RequestParam(defaultValue = "") String polarionProject) {
+        String polProj = polarionProject.isBlank() ? String.valueOf(projectId) : polarionProject;
+        ReconcileService.ReconcileReport r = reconcile.reconcile(projectId, polProj);
+        return ResponseEntity.ok(Map.of(
+                "matched", r.matched(), "mismatched", r.mismatched(), "missing", r.missing(),
+                "driftedPolarionIds", r.driftedPolarionIds(), "clean", r.clean(), "asOf", r.asOf()));
     }
 
     /** POST /api/sync/{projectId}/run — trigger an incremental read-sync (REQ-M1-02). 202 + runId. */
