@@ -1,0 +1,12 @@
+{
+  "app.title": "Test Management System",
+  "nav.dashboard": "Dashboard",
+  "nav.runs": "Test Runs",
+  "nav.defects": "Defects",
+  "nav.sync": "Polarion Sync",
+  "nav.admin": "Administration",
+  "lang.switch": "中文",
+  "sync.health": "Sync Health",
+  "sync.lastSuccess": "Last successful sync",
+  "common.loading": "Loading…"
+}

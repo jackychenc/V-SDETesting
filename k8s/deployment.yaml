@@ -1,0 +1,31 @@
+# TMS backend Deployment — skeleton (NFR-DEPLOY-01). Single-command staging deploy target (TS-B-09).
+# Secrets come from a Secret (secret store), NEVER inline (NFR-SEC-01, C4 M1-T1).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tms-backend
+  labels: { app: tms-backend, part-of: tms }
+spec:
+  replicas: 2                       # stateless; sync worker isolation handled in-app
+  selector:
+    matchLabels: { app: tms-backend }
+  template:
+    metadata:
+      labels: { app: tms-backend }
+    spec:
+      containers:
+        - name: tms-backend
+          image: registry.vgc.example/tms-backend:0.1.0   # placeholder registry, set by CI
+          ports: [{ containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: tms-config }
+            - secretRef: { name: tms-secrets }             # DB_PASSWORD, POLARION_TOKEN — from secret store
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8080 }
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            initialDelaySeconds: 30
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }

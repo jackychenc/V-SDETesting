@@ -1,0 +1,33 @@
+# TMS backend config — scaffold. NO secrets here (NFR-SEC-01); creds come from env/secret store.
+spring:
+  application:
+    name: tms-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/tms}
+    username: ${DB_USER:tms}
+    password: ${DB_PASSWORD:}          # injected from secret store; empty default, never a real secret
+  jpa:
+    hibernate:
+      ddl-auto: validate               # schema owned by Flyway, not Hibernate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration  # V1 schema lands post-G3 (B2 frozen data model)
+
+# Polarion sync (REQ-M1-*). Pilot uses mock (OUT-02); swap endpoint to sandbox/live, contract identical.
+tms:
+  polarion:
+    base-url: ${POLARION_URL:http://localhost:8081/mock-polarion}
+    mode: ${POLARION_MODE:mock}        # mock | sandbox | live
+    sync:
+      interval: ${SYNC_INTERVAL:PT15M} # default 15 min (REQ-M1-02)
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info            # health endpoint for K8s probes (NFR-AVAIL-01)
+  endpoint:
+    health:
+      probes:
+        enabled: true

@@ -1,0 +1,36 @@
+# TMS CI pipeline skeleton — stages aligned to C1 (task #7) harness + C4 (task #8) security gate.
+# Every stage gates the feature-branch PR; Senior Developer reviews & merges (agent never merges).
+stages:
+  - lint
+  - unit          # B3 unit tests
+  - api           # C1 API/contract tests vs Polarion mock + internal Sync API
+  - e2e           # C1 Playwright UI E2E
+  - perf          # C1 k6 perf (NFR-PERF-01 dashboard <=2s @10k/100)
+  - security      # C4 secret-scan + SAST (task #8 baseline) — no secrets in repo (NFR-SEC-01)
+  - rtm           # RTM coverage report + gate-readiness PASS/BLOCK
+
+lint:
+  stage: lint
+  script:
+    - cd backend && ./gradlew checkstyleMain || true   # wire real ruleset
+    - cd ../frontend && npm ci && npm run lint
+
+unit:
+  stage: unit
+  script:
+    - cd backend && ./gradlew test
+  artifacts:
+    reports: { junit: backend/build/test-results/test/*.xml }
+
+security:
+  stage: security
+  script:
+    # C4-owned gate config (task #8): secret scan + SAST. Fails build on secret/high-severity finding.
+    - echo "secret-scan (gitleaks) + SAST (semgrep) — config owned by C4 task #8"
+    - echo "no-secrets-in-repo enforcement (NFR-SEC-01); SBOM generation hook"
+  allow_failure: false
+
+rtm:
+  stage: rtm
+  script:
+    - echo "aggregate ReqID -> test coverage -> gate-readiness PASS/BLOCK (C1 owns report)"

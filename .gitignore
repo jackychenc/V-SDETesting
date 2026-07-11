@@ -1,0 +1,20 @@
+# Build
+backend/build/
+backend/.gradle/
+frontend/node_modules/
+frontend/dist/
+*.class
+
+# Secrets — NEVER commit (NFR-SEC-01; C4 secret-scan gate)
+*.env
+.env*
+**/secrets/
+*.pem
+*.key
+application-local.yml
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store

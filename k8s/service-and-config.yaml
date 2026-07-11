@@ -1,0 +1,21 @@
+# Service + ConfigMap (non-secret config only). Secret `tms-secrets` is provisioned from the
+# secret store out-of-band — NOT in this repo (NFR-SEC-01; C4 M1-T1 no-creds-in-repo).
+apiVersion: v1
+kind: Service
+metadata:
+  name: tms-backend
+spec:
+  selector: { app: tms-backend }
+  ports: [{ port: 80, targetPort: 8080 }]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tms-config
+data:
+  DB_URL: "jdbc:postgresql://tms-postgres:5432/tms"
+  DB_USER: "tms"
+  POLARION_URL: "http://mock-polarion:8081"   # pilot mock (OUT-02); swap to sandbox/live
+  POLARION_MODE: "mock"
+  SYNC_INTERVAL: "PT15M"
+# NOTE: DB_PASSWORD + POLARION_TOKEN are in Secret `tms-secrets`, sourced from the secret store.

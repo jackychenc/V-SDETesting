@@ -1,0 +1,12 @@
+{
+  "app.title": "测试管理系统",
+  "nav.dashboard": "仪表盘",
+  "nav.runs": "测试执行",
+  "nav.defects": "缺陷",
+  "nav.sync": "Polarion 同步",
+  "nav.admin": "系统管理",
+  "lang.switch": "EN",
+  "sync.health": "同步健康状态",
+  "sync.lastSuccess": "上次成功同步",
+  "common.loading": "加载中…"
+}
