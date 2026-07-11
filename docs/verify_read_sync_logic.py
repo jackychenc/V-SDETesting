@@ -98,3 +98,25 @@ r = reconcile([("A", {"title": "orig", "definition": "d"})], stored)
 check("reconcile_cleanWhenHashesMatch (matched=1, mismatched=0)", r["matched"] == 1 and r["mismatched"] == 0)
 
 print("\nALL RECONCILE SCENARIOS PASS — REQ-M1-05 overlap/already-synced coverage verified.")
+
+# --- PR#5 bidi write-back conflict (REQ-M1-03/04, TS-B-02): B2 E1/E2 predicate ---
+def write_back(polarion_rev, last_common_rev, current_tms_fields, stored_hash, has_open_conflict=False):
+    if has_open_conflict: return "FROZEN"
+    polarion_moved = polarion_rev is not None and polarion_rev != last_common_rev
+    tms_dirty = sha_fields(current_tms_fields) != stored_hash
+    if polarion_moved and tms_dirty: return "CONFLICT_QUEUED"   # no LWW
+    return "WRITTEN"
+
+synced = {"title": "orig", "definition": "d"}
+stored_h = sha_fields(synced)
+# Polarion-only change (rev moved 5->7, TMS clean) → write, no false conflict
+check("bidi_polarionOnly_noFalseConflict_writes",
+      write_back("7", "5", synced, stored_h) == "WRITTEN")
+# both changed (Polarion 5->7 AND TMS edited) → conflict queued, no overwrite
+check("bidi_bothChanged_conflictQueued_noLWW",
+      write_back("7", "5", {"title": "tms-edit", "definition": "d"}, stored_h) == "CONFLICT_QUEUED")
+# open conflict freezes auto-write (anti-thrash)
+check("bidi_openConflict_frozen",
+      write_back("7", "5", {"title": "x"}, stored_h, has_open_conflict=True) == "FROZEN")
+
+print("\nALL BIDI/CONFLICT SCENARIOS PASS — REQ-M1-03/04 E1/E2 no-silent-overwrite verified.")

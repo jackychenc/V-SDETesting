@@ -20,4 +20,10 @@ public interface PolarionClient {
 
     /** Fetch work items changed since the given revision (incremental extract, REQ-M1-02). */
     List<PolarionWorkItem> fetchChangedSince(String polarionProjectId, String sinceRevision);
+
+    /** Current Polarion revision of a work item (for conflict detection, REQ-M1-04). null if absent. */
+    String currentRevision(String polarionProjectId, String polarionId);
+
+    /** Write back to Polarion (REQ-M1-03). Returns the new revision. Idempotent on polarionId. */
+    String write(String polarionProjectId, PolarionWorkItem item);
 }

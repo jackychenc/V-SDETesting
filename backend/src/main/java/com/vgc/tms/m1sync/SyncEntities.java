@@ -28,9 +28,21 @@ public final class SyncEntities {
         public String title;
         @Column(columnDefinition = "text") public String definition;
         public String revision;
+        @Column(name = "last_common_rev") public String lastCommonRevision;  // conflict base (REQ-M1-04)
         @Column(name = "content_hash", length = 64) public String contentHash;
         @Column(name = "source_revision") public String sourceRevision;
         @Column(name = "last_synced_at") public Instant lastSyncedAt;
+    }
+
+    /** Queued conflict for human resolution (REQ-M1-04, TS-B-02). No last-write-wins. */
+    @Entity @Table(name = "conflict_item")
+    public static class ConflictItemEntity {
+        @Id @GeneratedValue(strategy = GenerationType.IDENTITY) public Long id;
+        @Column(name = "sync_run_id") public Long syncRunId;
+        @Column(name = "item_polarion_id", nullable = false) public String itemPolarionId;
+        @Column(name = "field_diffs", columnDefinition = "jsonb") public String fieldDiffs;  // TMS/Polarion/base diff
+        @Column(nullable = false) public String status = "open";   // open | resolved
+        @Column(columnDefinition = "jsonb") public String resolution;
     }
 
     /** Per-project incremental watermark (REQ-M1-02). watermark = highest contiguous all-success rev (B4#2). */

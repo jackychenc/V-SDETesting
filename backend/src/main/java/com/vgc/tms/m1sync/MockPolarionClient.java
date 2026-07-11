@@ -48,6 +48,22 @@ public class MockPolarionClient implements PolarionClient {
         return out;
     }
 
+    @Override
+    public String currentRevision(String polarionProjectId, String polarionId) {
+        PolarionWorkItem it = store.get(polarionId);
+        return it == null ? null : it.revision();
+    }
+
+    @Override
+    public String write(String polarionProjectId, PolarionWorkItem item) {
+        // simulate Polarion assigning a new (higher) revision on write
+        long next = 0;
+        for (PolarionWorkItem it : store.values()) next = Math.max(next, parse(it.revision()));
+        String newRev = String.valueOf(next + 1);
+        store.put(item.polarionId(), new PolarionWorkItem(item.polarionId(), item.type(), newRev, item.fields()));
+        return newRev;
+    }
+
     private static long parse(String rev) {
         if (rev == null || rev.isBlank()) return 0L;
         try { return Long.parseLong(rev); } catch (NumberFormatException e) { return 0L; }
